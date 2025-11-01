@@ -1,6 +1,6 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
-
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
@@ -10,7 +10,7 @@ import time
 import random
 
 def clean_text(text):
-    return ' '.join(text.strip().split()) if text else ""
+    return ' '.join(text.strip().split()) if text else None
 
 def setup_driver():
     options = Options()
@@ -29,28 +29,29 @@ def setup_driver():
 
 def extract_product_fields(product_div):
     title_elem = product_div.find("span", class_="a-size-medium a-color-base a-text-normal") or product_div.find("h2")
-    product_name = clean_text(title_elem.text) if title_elem else ""
+    product_name = clean_text(title_elem.text) if title_elem else None
     asin = product_div.get('data-asin', '')
-    brand = product_name.split(" ")[0] if product_name else ""
+    brand = product_name.split(" ")[0] if product_name else None
     
     price_tag = product_div.select_one("span.a-price > span.a-offscreen") or product_div.find("span", class_="a-price-whole")
-    price = price_tag.text.strip().replace('₹', '').replace(',', '').replace('.00', '') if price_tag else ""
+    price = price_tag.text.strip().replace('₹', '').replace(',', '').replace('.00', '') if price_tag else None
     
     mrp_tag = product_div.select_one("span.a-price.a-text-price > span.a-offscreen")
-    mrp = mrp_tag.text.strip().replace('₹', '').replace(',', '') if mrp_tag else ""
+    mrp = mrp_tag.text.strip().replace('₹', '').replace(',', '') if mrp_tag else price
     
     discount = ""
-    for span in product_div.select("span"):
-        txt = span.get_text(strip=True)
-        if "%" in txt and "off" in txt.lower():
-            discount = txt
-            break
+    html_text = str(product_div)
     
+    match = re.search(r'(\d+% ?off|\(\d+%\))', html_text, re.IGNORECASE)
+    if match:
+        discount = match.group(1)
+    else:
+        discount = "No Discount"
     rating_tag = product_div.find("span", class_="a-icon-alt")
-    rating = rating_tag.text.strip().split(" ")[0] if rating_tag else ""
+    rating = rating_tag.text.strip().split(" ")[0] if rating_tag else None
     
     reviews_tag = product_div.find("span", class_="a-size-base s-underline-text")
-    reviews = ''.join(filter(str.isdigit, reviews_tag.text)) if reviews_tag else ""
+    reviews = ''.join(filter(str.isdigit, reviews_tag.text)) if reviews_tag else None
     
     link_elem = product_div.find('a', class_='a-link-normal s-no-outline') or product_div.find('a', href=lambda x: x and '/dp/' in x)
     product_link = ""
@@ -66,7 +67,6 @@ def extract_product_fields(product_div):
         "MRP": mrp,
         "Discount": discount,
         "Rating": rating,
-        "Reviews_Count": reviews,
         "Product_Link": product_link,
         "Scraped_At": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
@@ -102,14 +102,21 @@ def extract_reviews_from_product_page(driver, product_url, max_reviews=10):
             stars = ""
             if stars_tag:
                 stars_text = stars_tag.text.strip()
-                stars = stars_text.split()[0] if stars_text else ""
-            
+                stars = stars_text.split()[0] if stars_text else None
+            total_reviews_text = soup.select_one("span[data-hook='total-review-count']") or \
+                     soup.find("span", class_="a-size-base a-color-secondary totalReviewCount")
+
+            if total_reviews_text:
+                total_reviews = ''.join(filter(str.isdigit, total_reviews_text.text))
+            else:
+                total_reviews = "Not found"
             all_reviews.append({
-                "title": clean_text(title_tag.text) if title_tag else "",
-                "body": clean_text(body_tag.text) if body_tag else "",
+                "total_review": total_reviews,
+                "title": clean_text(title_tag.text) if title_tag else None,
+                "body": clean_text(body_tag.text) if body_tag else None,
                 "stars": stars,
-                "reviewer": clean_text(reviewer_tag.text) if reviewer_tag else "",
-                "date": clean_text(date_tag.text) if date_tag else ""
+                "reviewer": clean_text(reviewer_tag.text) if reviewer_tag else None,
+                "date": clean_text(date_tag.text) if date_tag else None
             })
         
     except Exception as e:
@@ -149,6 +156,7 @@ def main(query, pages=1, max_reviews_per_product=5):
                     for rev in all_revs:
                         row = pdict.copy()
                         row.update({
+                            "Review Counting": rev['total_review'],
                             "Review_Title": rev["title"],
                             "Review_Body": rev["body"],
                             "Review_Stars": rev["stars"],
