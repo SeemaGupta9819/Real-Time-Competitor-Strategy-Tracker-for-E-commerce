@@ -1,4 +1,6 @@
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+import matplotlib
+matplotlib.use("Agg")   
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller, acf, pacf
 import numpy as np

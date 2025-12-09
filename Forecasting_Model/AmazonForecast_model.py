@@ -1,100 +1,113 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt 
-
-from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+import matplotlib.pyplot as plt
 
-# ----------------------
-# LOAD DATA
-# ----------------------
+
 train = pd.read_csv("Forecasting_Model/amazon_train.csv")
-test  = pd.read_csv("Forecasting_Model/amazon_test.csv")
+test = pd.read_csv("Forecasting_Model/amazon_test.csv")
 
-# -----------------------------
-# FIX STRING PERCENT COLUMNS
-# -----------------------------
-for df in [train, test]:
-    for col in df.columns:
-        if df[col].dtype == "object":
-            df[col] = df[col].replace('%', '', regex=True)
-            df[col] = pd.to_numeric(df[col], errors="ignore")
 
-# ----------------------
-# TARGET
-# ----------------------
-target = "amazon_price"
+# ----------- FEATURE ENGINEERING FUNCTION (Reusable for Train + Test) -----------
 
-drop_cols = ["datetime", "date"]
-train = train.drop(columns=drop_cols, errors='ignore')
-test = test.drop(columns=drop_cols, errors='ignore')
+def add_features(df):
+    df = df.copy()
 
-X_train = train.drop(columns=[target])
-y_train = train[target]
+    # Date handling
+    df['date'] = pd.to_datetime(df['date'])
 
-X_test = test.drop(columns=[target])
-y_test = test[target]
+    # Clean and convert discount column
+    if 'amazon_discount' in df.columns:
+        df['amazon_discount'] = df['amazon_discount'].astype(str).str.replace('%', '', regex=False)
+        df['amazon_discount'] = pd.to_numeric(df['amazon_discount'], errors='coerce').fillna(0.0)
 
-# ----------------------
-# METRICS
-# ----------------------
-def evaluate(true, pred):
-    rmse = np.sqrt(mean_squared_error(true, pred))
-    mae = mean_absolute_error(true, pred)
-    mape = np.mean(np.abs((true - pred) / true)) * 100
-    return rmse, mae, mape
+    # Ensure price numeric
+    df['amazon_price'] = pd.to_numeric(df['amazon_price'], errors='coerce')
 
-# ----------------------
-# MODEL — ONLY LINEAR REGRESSION
-# ----------------------
+    # Lags
+    df['lag_1'] = df['amazon_price'].shift(1)
+    df['lag_7'] = df['amazon_price'].shift(7)
+
+    # Rolling mean features
+    df['roll_mean_14'] = df['amazon_price'].shift(1).rolling(14).mean()
+    df['roll_mean_30'] = df['amazon_price'].shift(1).rolling(30).mean()
+    df['roll_std_30'] = df['amazon_price'].shift(1).rolling(30).std()
+    df['momentum_14'] = df['amazon_price'] - df['amazon_price'].shift(14)
+
+    
+
+
+    # Time features
+    df['month'] = df['date'].dt.month
+    df['dayofweek'] = df['date'].dt.dayofweek
+
+    # Remove rows with missing engineered features
+    df = df.dropna().reset_index(drop=True)
+
+    return df
+
+
+# ---------------- APPLY FEATURE ENGINEERING ----------------
+
+train_fe = add_features(train)
+test_fe = add_features(test)
+
+
+# ---------------- SELECT FEATURES AND TARGET ----------------
+
+features = ['lag_1', 'lag_7', 'month', 'roll_mean_30', 'roll_mean_14',"roll_std_30","momentum_14"]
+
+
+X_train = train_fe[features]
+y_train = train_fe['amazon_price']
+
+X_test = test_fe[features]
+y_test = test_fe['amazon_price']
+
+
+# ---------------- TRAIN MODEL ----------------
+
 model = LinearRegression()
-
-print("\n==============================")
-print("Training & Evaluating: Linear Regression")
-print("==============================")
-
 model.fit(X_train, y_train)
-preds = model.predict(X_test)
 
-# Metrics
-rmse, mae, mape = evaluate(y_test, preds)
 
-print("\nLinear Regression Performance:")
-print(f"RMSE: {rmse}")
-print(f"MAE : {mae}")
-print(f"MAPE: {mape}%")
-# -----------------------------
-# PLOT — Actual vs Predicted
-# -----------------------------
+# ---------------- PREDICT ----------------
 
-# Load datetime column separately (because we dropped it before training)
-plot_data = pd.read_csv("Forecasting_Model/amazon_test.csv")
-plot_data["datetime"] = pd.to_datetime(plot_data["datetime"])
+pred = model.predict(X_test)
 
+
+# -------------------------------------------------
+# PLOT
+# -------------------------------------------------
 plt.figure(figsize=(14,6))
-plt.plot(plot_data["datetime"], y_test.values, label="Actual Price")
-plt.plot(plot_data["datetime"], preds, label="Linear Regression Predicted", linestyle="dashed")
-
-plt.title("Actual vs Predicted Price — Linear Regression")
-plt.xlabel("Date")
-plt.ylabel("Price")
+plt.plot(test_fe["date"], y_test, label="Actual Price")
+plt.plot(test_fe["date"], pred, label="Predicted Price", linestyle="dashed")
+plt.title("Linear Regression - Amazon Price")
 plt.xticks(rotation=45)
 plt.legend()
-plt.grid(True)
-plt.tight_layout()
+plt.grid()
 plt.show()
 
+# ---------------- METRICS ----------------
 
-# -----------------------------
-# SAVE OUTPUT AS CSV
-# -----------------------------
+rmse = np.sqrt(mean_squared_error(y_test, pred))
+mae = mean_absolute_error(y_test, pred)
+mape = np.mean(np.abs((y_test - pred) / (y_test + 1e-9))) * 100
+
+print("====== MODEL PERFORMANCE ======")
+print(f"RMSE : {rmse:.2f}")
+print(f"MAE  : {mae:.2f}")
+print(f"MAPE : {mape:.2f}%")
+
+
 
 output_df = pd.DataFrame({
-    "datetime": plot_data["datetime"],
-    "actual_price": y_test.values,
-    "predicted_price": preds
+    "date": test_fe["date"],
+    "actual": y_test,
+    "predicted": pred
 })
 
-output_df.to_csv("Forecasting_Model/Amazon_output.csv", index=False)
+output_df.to_csv("Forecasting_Model/amazon_output.csv", index=False)
 
-print("\nSaved CSV: Forecasting_Model/linear_regression_output.csv")
+print("\n📁 Saved: Forecasting_Model/amazon_output.csv")

@@ -301,7 +301,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_SOURCES = {
     "trend": BASE_DIR / "Trend_Analysis" / "trend_analysis.csv",
     "daily": BASE_DIR / "processed_dataset" / "daily_price_dataset.csv",
-    "amazon_forecast": BASE_DIR / "Forecasting_Model" / "Amazon_output.csv",
+    "amazon_forecast": BASE_DIR / "Forecasting_Model" / "amazon_output.csv",
     "flipkart_forecast": BASE_DIR / "Forecasting_Model" / "flipkart_output.csv",
     "reviews": BASE_DIR / "Sentiment_Analysis" / "Reviews_Output (5).xlsx",
 }
@@ -331,6 +331,35 @@ def ensure_datetime(df: pd.DataFrame, column: str) -> pd.DataFrame:
 
 def parse_percentage(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series.astype(str).str.replace("%", "", regex=False), errors="coerce")
+
+def render_product_header():
+    st.markdown("## 🛍️ Product Details")
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.image("imge.jpg", use_container_width=True)  # put product.jpg in your folder
+
+    with col2:
+        st.markdown("""
+            ### Apple iPhone 15 (256GB)
+            - **Brand:** Apple  
+            - **Category:** Smartphone  
+            - **Rating:** ⭐ 4.6  
+            - **Platforms:** Amazon & Flipkart
+            - Description
+                    Experience the iPhone 15 – your dynamic companion. Dynamic I
+                    sland ensures you stay 
+                    connected, bubbling up alerts seamlessly while you're busy. Its 
+                    durable design features infused glass and aerospace-grade aluminum, 
+                    making it dependable and resistant to water and dust. Capture life 
+                    with precision using the 48 MP Main Camera, perfect for any shot. 
+                    Powered by the A16 Bionic Processor, it excels in computational 
+                    photography and more, all while conserving battery life. Plus, it's USB-C compatible, 
+                    simplifying your charging needs. Elevate your tech game with the 
+                    iPhone 15 – innovation at your fingertips. Goodbye cable clutter, 
+                    hello convenience.
+        """)
 
 def send_alert_email(subject, body, receiver_email):
 
@@ -373,6 +402,8 @@ def send_alert_email(subject, body, receiver_email):
 
 
 def render_trend_page(trend_df: pd.DataFrame, daily_df: pd.DataFrame) -> None:
+    render_product_header()   # ← ADD THIS LINE
+    
     st.title("Trend Analysis")
     if trend_df.empty:
         st.info("Trend analysis data is not available.")
@@ -563,32 +594,64 @@ def render_reviews_page(df: pd.DataFrame) -> None:
 
 
 def render_forecast_page(df: pd.DataFrame, label: str) -> None:
+    df = df.copy()
+    df = ensure_datetime(df, "date").sort_values("date")
+    # ========================================
+    # AUTO CALCULATE EM (Same for both models)
+    # ========================================
+    if {"actual", "predicted"}.issubset(df.columns):
+
+        df_clean = df.dropna(subset=["actual", "predicted"])
+
+        if not df_clean.empty:
+            df_clean["error"] = df_clean["actual"] - df_clean["predicted"]
+            df_clean["abs_error"] = df_clean["error"].abs()
+            df_clean["sq_error"] = df_clean["error"] ** 2
+            df_clean["ape"] = (df_clean["abs_error"] / df_clean["actual"]) * 100
+
+            MAE = df_clean["abs_error"].mean()
+            RMSE = (df_clean["sq_error"].mean()) ** 0.5
+            MAPE = df_clean["ape"].mean()
+
+            st.markdown(f"### 📊 {label} Model Evaluation Metrics")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("MAE", f"{MAE:,.2f}")
+            col2.metric("RMSE", f"{RMSE:,.2f}")
+            col3.metric("MAPE", f"{MAPE:.2f}%")
+            st.markdown("---")
+
+    # ----------------------------------------
+    # FORECAST DASHBOARD
+    # ----------------------------------------
     st.title(f"{label} Forecast Dashboard")
+    
     if df.empty:
         st.info(f"{label} forecast data is not available.")
         return
 
     df = df.copy()
-    df = ensure_datetime(df, "datetime").sort_values("datetime")
+    df = ensure_datetime(df, "date").sort_values("date")
 
     col1, col2 = st.columns(2)
-    latest = df.dropna(subset=["actual_price"]).tail(1)
+    latest = df.dropna(subset=["actual"]).tail(1)
     if not latest.empty:
         latest_row = latest.iloc[0]
-        col1.metric("Latest Actual Price", f"INR {latest_row['actual_price']:,.0f}")
-        col2.metric("Latest Predicted Price", f"INR {latest_row['predicted_price']:,.0f}")
+        col1.metric("Latest Actual Price", f"INR {latest_row['actual']:,.0f}")
+        col2.metric("Latest Predicted Price", f"INR {latest_row['predicted']:,.0f}")
 
     forecast_long = df.melt(
-        "datetime",
-        value_vars=["actual_price", "predicted_price"],
+        "date",
+        value_vars=["actual", "predicted"],
         var_name="Series",
         value_name="Price",
     )
-    label_map = {"actual_price": "Actual Price", "predicted_price": "Predicted Price"}
+    
+    label_map = {"actual": "Actual Price", "predicted": "Predicted Price"}
     forecast_long["Series Label"] = forecast_long["Series"].map(label_map)
+
     fig = px.line(
         forecast_long,
-        x="datetime",
+        x="date",
         y="Price",
         color="Series Label",
         line_dash="Series Label",
@@ -601,17 +664,20 @@ def render_forecast_page(df: pd.DataFrame, label: str) -> None:
     fig = style_figure(fig, f"{label} Actual vs Predicted Prices")
     st.plotly_chart(fig, use_container_width=True)
 
-    if {"actual_price", "predicted_price"}.issubset(df.columns):
-        df["abs_error"] = (df["actual_price"] - df["predicted_price"]).abs()
+    if {"actual", "predicted"}.issubset(df.columns):
+        df["abs_error"] = (df["actual"] - df["predicted"]).abs()
         error_fig = px.area(
             df.tail(60),
-            x="datetime",
+            x="date",
             y="abs_error",
             color_discrete_sequence=[THEME["accent"]],
         )
         error_fig = style_figure(error_fig, f"{label} Absolute Forecast Error (latest 60 points)")
         st.plotly_chart(error_fig, use_container_width=True)
 
+    # -------------------------------
+    # TABLE + FILTERS
+    # -------------------------------
     st.subheader("Forecast Table")
     with st.expander("📊 Dataset Options", expanded=False):
         filter_cols = st.columns(4)
@@ -621,17 +687,17 @@ def render_forecast_page(df: pd.DataFrame, label: str) -> None:
         
         with filter_cols[1]:
             date_range = None
-            if "datetime" in df.columns:
-                df_sorted = df.dropna(subset=["datetime"]).sort_values("datetime")
+            if "date" in df.columns:
+                df_sorted = df.dropna(subset=["date"]).sort_values("date")
                 if not df_sorted.empty:
-                    min_date = pd.to_datetime(df_sorted["datetime"].iloc[0]).date()
-                    max_date = pd.to_datetime(df_sorted["datetime"].iloc[-1]).date()
+                    min_date = pd.to_datetime(df_sorted["date"].iloc[0]).date()
+                    max_date = pd.to_datetime(df_sorted["date"].iloc[-1]).date()
                     date_range = st.date_input("Date range", value=(min_date, max_date), key=f"forecast_{label.lower()}_date")
         
         with filter_cols[2]:
             price_range = None
-            if "actual_price" in df.columns and "predicted_price" in df.columns:
-                all_prices = pd.concat([df["actual_price"], df["predicted_price"]]).dropna()
+            if "actual" in df.columns and "predicted" in df.columns:
+                all_prices = pd.concat([df["actual"], df["predicted"]]).dropna()
                 if len(all_prices) > 0:
                     min_price = float(all_prices.min())
                     max_price = float(all_prices.max())
@@ -644,18 +710,16 @@ def render_forecast_page(df: pd.DataFrame, label: str) -> None:
     # Apply filters
     display_df = df.copy()
     
-    # Apply date range filter
-    if "datetime" in display_df.columns and date_range and len(date_range) == 2:
-        display_df["datetime"] = pd.to_datetime(display_df["datetime"], errors="coerce")
-        display_df = display_df[(display_df["datetime"].dt.date >= date_range[0]) & (display_df["datetime"].dt.date <= date_range[1])]
+    if date_range and len(date_range) == 2:
+        display_df["date"] = pd.to_datetime(display_df["date"], errors="coerce")
+        display_df = display_df[(display_df["date"].dt.date >= date_range[0]) & (display_df["date"].dt.date <= date_range[1])]
     
-    # Apply price range filter
     if price_range and len(price_range) == 2:
-        if "actual_price" in display_df.columns:
-            display_df = display_df[(display_df["actual_price"] >= price_range[0]) & (display_df["actual_price"] <= price_range[1])]
+        display_df = display_df[(display_df["actual"] >= price_range[0]) & (display_df["actual"] <= price_range[1])]
     
     display_df = display_df.tail(rows_to_show)
     st.dataframe(display_df, use_container_width=True)
+
 
 
 def render_daily_page(df: pd.DataFrame) -> None:
@@ -848,20 +912,20 @@ def render_comparison_page(trend_df: pd.DataFrame,
     # Amazon Forecast
     if show_amazon_forecast and not amazon_df.empty:
         st.subheader("🔮 Amazon Forecast (Actual vs Predicted)")
-        amazon_copy = ensure_datetime(amazon_df.copy(), "datetime").sort_values("datetime")
+        amazon_copy = ensure_datetime(amazon_df.copy(), "date").sort_values("date")
         
         forecast_long = amazon_copy.melt(
-            "datetime",
-            value_vars=["actual_price", "predicted_price"],
+            "date",
+            value_vars=["actual", "predicted"],
             var_name="Series",
             value_name="Price",
         )
-        label_map = {"actual_price": "Actual Price", "predicted_price": "Predicted Price"}
+        label_map = {"actual": "Actual Price", "predicted": "Predicted Price"}
         forecast_long["Series Label"] = forecast_long["Series"].map(label_map)
         
         fig = px.line(
             forecast_long,
-            x="datetime",
+            x="date",
             y="Price",
             color="Series Label",
             line_dash="Series Label",
@@ -877,20 +941,20 @@ def render_comparison_page(trend_df: pd.DataFrame,
     # Flipkart Forecast
     if show_flipkart_forecast and not flipkart_df.empty:
         st.subheader("🔮 Flipkart Forecast (Actual vs Predicted)")
-        flipkart_copy = ensure_datetime(flipkart_df.copy(), "datetime").sort_values("datetime")
+        flipkart_copy = ensure_datetime(flipkart_df.copy(), "date").sort_values("date")
         
         forecast_long = flipkart_copy.melt(
-            "datetime",
-            value_vars=["actual_price", "predicted_price"],
+            "date",
+            value_vars=["actual", "predicted"],
             var_name="Series",
             value_name="Price",
         )
-        label_map = {"actual_price": "Actual Price", "predicted_price": "Predicted Price"}
+        label_map = {"actual": "Actual Price", "predicted": "Predicted Price"}
         forecast_long["Series Label"] = forecast_long["Series"].map(label_map)
         
         fig = px.line(
             forecast_long,
-            x="datetime",
+            x="date",
             y="Price",
             color="Series Label",
             line_dash="Series Label",
@@ -918,12 +982,12 @@ def render_comparison_page(trend_df: pd.DataFrame,
     if not (amazon_df.empty or flipkart_df.empty):
         st.markdown("---")
         st.subheader("🎯 Combined Forecast Comparison Across Platforms")
-        amazon = ensure_datetime(amazon_df.copy(), "datetime").assign(Platform="Amazon")
-        flipkart = ensure_datetime(flipkart_df.copy(), "datetime").assign(Platform="Flipkart")
+        amazon = ensure_datetime(amazon_df.copy(), "date").assign(Platform="Amazon")
+        flipkart = ensure_datetime(flipkart_df.copy(), "date").assign(Platform="Flipkart")
         combined = pd.concat([amazon, flipkart], ignore_index=True)
         combined_long = combined.melt(
-            id_vars=["datetime", "Platform"],
-            value_vars=["actual_price", "predicted_price"],
+            id_vars=["date", "Platform"],
+            value_vars=["actual", "predicted"],
             var_name="Series",
             value_name="Price",
         )
@@ -935,7 +999,7 @@ def render_comparison_page(trend_df: pd.DataFrame,
         if len(selected_companies) < 2:
             combined_long = combined_long[combined_long["Platform"].isin(selected_companies)]
         
-        forecast_fig = px.line(combined_long, x="datetime", y="Price", color="Curve", markers=True)
+        forecast_fig = px.line(combined_long, x="date", y="Price", color="Curve", markers=True)
         forecast_fig = style_figure(forecast_fig, "All Forecasts Comparison")
         st.plotly_chart(forecast_fig, use_container_width=True)
 
