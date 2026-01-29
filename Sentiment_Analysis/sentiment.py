@@ -1,4 +1,8 @@
 from groq import Groq
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -6,7 +10,7 @@ import re, json, time, random
 from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 # ====================== CONFIG ======================
-API_KEY = "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"
+API_KEY = os.getenv("GROQ_API_KEY")
 INPUT_FILE = r"/content/Reviews.xlsx"
 OUTPUT_FILE = INPUT_FILE.replace(".xlsx", "_Output.xlsx")
 

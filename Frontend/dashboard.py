@@ -11,10 +11,15 @@ from datetime import datetime
 if "sent_alerts_log" not in st.session_state:
     st.session_state.sent_alerts_log = []
 
-EMAIL_SENDER = "seemag7738@gmail.com"
+from dotenv import load_dotenv
+import os
 
-EMAIL_PASSWORD = "jjfvmoetuuzpzndt"    # 16-character Gmail app password
-EMAIL_RECEIVER = "seemag7738@gmail.com"
+load_dotenv()
+
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")    # 16-character Gmail app password
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 
 
 st.set_page_config(page_title="Real-Time Competitor Strategy Tracker for E-commerce", layout="wide")
@@ -363,8 +368,8 @@ def render_product_header():
 
 def send_alert_email(subject, body, receiver_email):
 
-    sender_email = "seemag7738@gmail.com"
-    app_password = "jjfvmoetuuzpzndt"  # Gmail App Password
+    sender_email = os.getenv("EMAIL_SENDER")
+    app_password = os.getenv("EMAIL_PASSWORD")  # Gmail App Password
 
     print("\n===== EMAIL DEBUG START =====")
     print(f"📧 Sending to: {receiver_email}")
